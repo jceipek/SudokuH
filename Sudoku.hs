@@ -1,9 +1,11 @@
 import Data.List (intersect)
 import Data.List (sortBy)
+import Debug.Trace (trace)
 
 puzzle :: [[[Int]]]
 
 -- Simple enough to solve without assumptions
+-- http://www.sudokukingdom.com/very-easy-sudoku.php
 {-
 puzzle = [[[ ],[ ],[7],[ ],[6],[9],[5],[ ],[1]],
             [[8],[ ],[5],[ ],[7],[ ],[9],[ ],[6]],
@@ -29,6 +31,8 @@ puzzle = [[[ ],[ ],[7],[ ],[6],[9],[5],[ ],[1]],
 
 
 -- Easy puzzle
+-- http://puzzles.about.com/library/sudoku/blprsudokue27.htm
+{-
 puzzle = [[[ ],[ ],[ ],[4],[ ],[5],[ ],[ ],[ ]],
           [[ ],[9],[ ],[8],[ ],[1],[ ],[7],[ ]],
           [[2],[ ],[ ],[9],[6],[3],[ ],[ ],[8]],
@@ -38,6 +42,7 @@ puzzle = [[[ ],[ ],[ ],[4],[ ],[5],[ ],[ ],[ ]],
           [[7],[ ],[ ],[5],[1],[6],[ ],[ ],[3]],
           [[ ],[4],[ ],[7],[ ],[2],[ ],[5],[ ]],
           [[ ],[ ],[ ],[3],[ ],[9],[ ],[ ],[ ]]]
+-}
 
 -- *Main> puzzleDisplay (dfsSolve (buildPuzzleState puzzle (3,3)))
 -- [[8],[6],[1],[4],[7],[5],[9],[3],[2]]
@@ -50,18 +55,17 @@ puzzle = [[[ ],[ ],[ ],[4],[ ],[5],[ ],[ ],[ ]],
 -- [[6],[4],[3],[7],[8],[2],[1],[5],[9]]
 -- [[1],[5],[2],[3],[4],[9],[7],[8],[6]]
 
--- Hard puzzle; not solved after 9 hours
-{-
-puzzle = [[[ ],[ ],[ ],[8],[4],[ ],[ ],[ ],[9]],
-          [[ ],[ ],[1],[ ],[ ],[ ],[ ],[ ],[5]],
-          [[8],[ ],[ ],[ ],[2],[1],[4],[6],[ ]],
-          [[7],[ ],[8],[ ],[ ],[ ],[ ],[9],[ ]],
-          [[ ],[ ],[ ],[ ],[ ],[ ],[ ],[ ],[ ]],
-          [[ ],[5],[ ],[ ],[ ],[ ],[3],[ ],[1]],
-          [[ ],[2],[4],[9],[1],[ ],[ ],[ ],[7]],
-          [[9],[ ],[ ],[ ],[ ],[ ],[5],[ ],[ ]],
-          [[3],[ ],[ ],[ ],[8],[4],[ ],[ ],[ ]]]
--}
+-- Medium Puzzle
+-- http://puzzles.about.com/library/sudoku/blprsudokum07.htm
+puzzle = [[[5],[4],[ ],[2],[ ],[9],[ ],[ ],[1]],
+          [[ ],[ ],[ ],[5],[ ],[ ],[ ],[ ],[4]],
+          [[ ],[ ],[7],[ ],[ ],[ ],[9],[ ],[ ]],
+          [[8],[ ],[ ],[ ],[3],[ ],[ ],[6],[7]],
+          [[ ],[ ],[ ],[6],[ ],[5],[ ],[ ],[ ]],
+          [[9],[3],[ ],[ ],[1],[ ],[ ],[ ],[2]],
+          [[ ],[ ],[1],[ ],[ ],[ ],[6],[ ],[ ]],
+          [[2],[ ],[ ],[ ],[ ],[6],[ ],[ ],[ ]],
+          [[3],[ ],[ ],[1],[ ],[7],[ ],[4],[9]]]
 
 ------------------------------------
 -- GENERAL HELPER FUNCTIONS --
@@ -131,12 +135,6 @@ isValidList :: [[Int]] -> Bool
 isValidList [] = True
 isValidList (x:xs) = ((x == []) || (x `notElem` xs)) && (isValidList xs)
 
--- Checks if a puzzle with given region dimensions is valid by Sudoku rules
-isValidState :: [[[Int]]] -> (Int,Int) -> Bool
-isValidState p regionDims = (null (filter (\x -> (isValidList x) == False) (getRows p))) &&
-                 (null (filter (\x -> (isValidList x) == False) (getColumns p))) &&
-                 (null (filter (\x -> (isValidList x) == False) (getRegions p regionDims)))
-
 -- Checks if the puzzle has no blank places
 isComplete :: [[[Int]]] -> Bool
 isComplete p = [] `notElem` (concat p)
@@ -170,6 +168,17 @@ missingAt p regionDims loc
           missingFromRow = missingFromList (getRow p yPos)
           missingFromColumn = missingFromList (getColumn p xPos)
           missingFromRegion = missingFromList (getRegion p regionDims (getRegionForLoc regionDims loc))
+
+-- Checks if a puzzle with given region dimensions is valid by Sudoku rules
+isValidState :: [[[Int]]] -> (Int,Int) -> Bool
+isValidState p regionDims = (null (filter (\x -> (isValidList x) == False) (getRows p))) &&
+                 (null (filter (\x -> (isValidList x) == False) (getColumns p))) &&
+                 (null (filter (\x -> (isValidList x) == False) (getRegions p regionDims))) &&
+                 (not (isUnsolvableState p regionDims))
+
+-- Checks if the puzzle has a spot with no possible moves
+isUnsolvableState :: [[[Int]]] -> (Int,Int) -> Bool
+isUnsolvableState p regionDims = not (null (filter (==True) [((getSymbolAt p loc) == []) && (null (missingAt p regionDims loc)) | loc <- (generateAllLocs p)]))
 
 -- Generate a list of every possible (x,y) position on the puzzle (even occupied squares)
 generateAllLocs :: [[[Int]]] -> [(Int, Int)]
@@ -214,57 +223,109 @@ solveForced p regionDims = solveForcedRecurser (p, True) regionDims locsToCheck
 ------------------------------------
 -- AI SOLVER --
 ------------------------------------
+-- Helper for constructing a puzzle state of the form (puzzle, region dimensions)
 buildPuzzleState :: [[[Int]]] -> (Int,Int) -> ([[[Int]]], (Int,Int))
 buildPuzzleState p regionDims = (p,regionDims)
 
+-- Gets the puzzle from a puzzle state
 puzzleStatePuzzle :: ([[[Int]]], (Int,Int)) -> [[[Int]]]
 puzzleStatePuzzle ps = fst ps
 
+-- Gets the region dimensions from a puzzle state
 puzzleStateRegionDims :: ([[[Int]]],(Int,Int)) -> (Int,Int)
 puzzleStateRegionDims ps = snd ps
 
-buildMove :: (Int,Int) -> [[Int]] -> ((Int,Int),[[Int]])
-buildMove loc options = (loc, options)
+-- Helper for constructing a move group pair of the form (loc,options)
+buildMoveGroup :: (Int,Int) -> [[Int]] -> ((Int,Int),[[Int]])
+buildMoveGroup loc options = (loc, options)
 
-moveLoc :: ((Int,Int),[[Int]]) -> (Int,Int)
+-- Gets the location on the board contained in a move group
+moveGroupLoc :: ((Int,Int),[[Int]]) -> (Int,Int)
+moveGroupLoc ms = fst ms
+
+-- Gets the options from a move group, which represent all
+-- possible symbols that can be placed at the location indicated by the move
+moveGroupOptions :: ((Int,Int),[[Int]]) -> [[Int]]
+moveGroupOptions ms = snd ms
+
+-- Helper for constructing a move pair of the form (loc,opt)
+buildMove :: (Int,Int) -> [Int] -> ((Int,Int),[Int])
+buildMove loc opt = (loc, opt)
+
+-- Gets the location from a move, which is where the symbol should be placed
+moveLoc :: ((Int,Int),[Int]) -> (Int,Int)
 moveLoc ms = fst ms
 
-moveOptions :: ((Int,Int),[[Int]]) -> [[Int]]
-moveOptions ms = snd ms
+-- Gets the option from a move, which is the symbol to be placed
+moveOption :: ((Int,Int),[Int]) -> [Int]
+moveOption ms = snd ms
 
-generatePossibleMoves :: ([[[Int]]], (Int,Int)) -> [((Int,Int),[[Int]])]
-generatePossibleMoves ps = [buildMove loc [[x] | x <- (missingAt p (puzzleStateRegionDims ps) loc)] | loc <- (generateAllLocs p)]
+-- Generate all possible move groups, including those that don't include any symbols to place
+generatePossibleMoveGroups :: ([[[Int]]], (Int,Int)) -> [((Int,Int),[[Int]])]
+generatePossibleMoveGroups ps = [buildMoveGroup loc [[x] | x <- (missingAt p (puzzleStateRegionDims ps) loc)] | loc <- (generateAllLocs p)]
     where p = (puzzleStatePuzzle ps)
 
-eliminateInvalidMoves :: [((Int,Int),[[Int]])] -> [((Int,Int),[[Int]])]
-eliminateInvalidMoves moves = filter (\m -> (moveOptions m) /= []) moves
+-- Eliminates all move groups that don't include symbols
+eliminateInvalidMoveGroups :: [((Int,Int),[[Int]])] -> [((Int,Int),[[Int]])]
+eliminateInvalidMoveGroups moves = filter (\m -> (moveGroupOptions m) /= []) moves
 
-sortMoves :: [((Int,Int),[[Int]])] -> [((Int,Int),[[Int]])]
-sortMoves moves = sortBy (\ x y -> compare (length (moveOptions x)) (length (moveOptions y))) moves
+-- Sort the given move groups in order from smallest to greatest branching factor
+sortMoveGroups :: [((Int,Int),[[Int]])] -> [((Int,Int),[[Int]])]
+sortMoveGroups moves = sortBy (\ x y -> compare (length (moveGroupOptions x)) (length (moveGroupOptions y))) moves
 
-generateGoodMovesFirst :: ([[[Int]]], (Int,Int)) -> [((Int,Int),[[Int]])]
-generateGoodMovesFirst ps = sortMoves (eliminateInvalidMoves (generatePossibleMoves ps))
+-- Generate all valid move groups in order from smallest to greatest branching factor
+generateGoodMoveGroupsFirst :: ([[[Int]]], (Int,Int)) -> [((Int,Int),[[Int]])]
+generateGoodMoveGroupsFirst ps = sortMoveGroups (eliminateInvalidMoveGroups (generatePossibleMoveGroups ps))
 
-dfsSolveHelperHelper :: ([[[Int]]], (Int,Int)) -> ((Int,Int),[[Int]]) -> ([[[Int]]], (Int,Int))
-dfsSolveHelperHelper ps (loc,[]) = ps
-dfsSolveHelperHelper ps (loc,(s:ss))
-    | isComplete newP = newState
-    | null possMoves = dfsSolveHelperHelper ps (loc,ss)
-    | otherwise = dfsSolveHelper newState possMoves
-    where p = (puzzleStatePuzzle ps)
+-- Expands a move group of the form (loc,options) into a list of moves in the form [(loc,option)]
+expandMoveGroup :: ((Int,Int),[[Int]]) -> [((Int,Int),[Int])]
+expandMoveGroup mg = [buildMove loc opt | opt <- opts]
+    where loc  = moveGroupLoc mg
+          opts = moveGroupOptions mg
+
+-- Expands groups of moves of the form [(loc,options)] into a list of moves in the form [(loc,option)]
+expandMoveGroups :: [((Int,Int),[[Int]])] -> [((Int,Int),[Int])]
+expandMoveGroups mgs = concat [expandMoveGroup grp | grp <- mgs]
+
+-- Creates a list of valid moves in order from smallest to greatest branching factor
+generateGoodMovesFirst :: ([[[Int]]], (Int,Int)) -> [((Int,Int),[Int])]
+generateGoodMovesFirst ps = expandMoveGroups (generateGoodMoveGroupsFirst ps)
+
+-- Checks if the given location is not empty
+isOccupied :: ([[[Int]]], (Int,Int)) -> (Int,Int) -> Bool
+isOccupied ps loc = (getSymbolAt (puzzleStatePuzzle ps) loc) /= []
+
+-- Syntactic helper for making a move on the board
+makeMove :: ([[[Int]]], (Int,Int)) -> ((Int,Int),[Int]) -> ([[[Int]]], (Int,Int))
+ps `makeMove` m
+    | otherwise = buildPuzzleState (placeSymbolAt p opt loc) regionDims 
+    where loc = (moveLoc m)
+          opt = (moveOption m)
+          p = (puzzleStatePuzzle ps)
           regionDims = (puzzleStateRegionDims ps)
-          newP = (placeSymbolAt p s loc)
-          newState = buildPuzzleState newP regionDims
-          possMoves = (generateGoodMovesFirst newState)
 
-dfsSolveHelper :: ([[[Int]]], (Int,Int)) -> [((Int,Int),[[Int]])] -> ([[[Int]]], (Int,Int))
-dfsSolveHelper ps [] = ps
-dfsSolveHelper ps (m:moves)
-    | isComplete (puzzleStatePuzzle newState) = newState
-    | otherwise = dfsSolveHelper ps moves
-    where newState = dfsSolveHelperHelper ps m
+-- Depth first search for dfsSolver
+dfsSolverHelper :: ([[[Int]]], (Int,Int)) -> [((Int,Int),[Int])] -> ([[[Int]]], (Int,Int))
+dfsSolverHelper ps [] = ps
+dfsSolverHelper ps (m:moves)
+    | not (isValidState (puzzleStatePuzzle ps) (puzzleStateRegionDims ps)) = ps
+    | (isComplete forcedP) = forcedPs
+    | not (isValidState (puzzleStatePuzzle ultimateState) (puzzleStateRegionDims ps)) = (dfsSolverHelper ps moves)
+    | isComplete (puzzleStatePuzzle ultimateState) = ultimateState
+    | otherwise = (dfsSolverHelper ps moves)
+    where newPS = (ps `makeMove` m)
+          newP = (puzzleStatePuzzle newPS)
+          regionDims = (puzzleStateRegionDims newPS)
+          forcedPs = buildPuzzleState (solveForced newP regionDims) regionDims
+          forcedP = (puzzleStatePuzzle forcedPs)
+          ultimateState = dfsSolverHelper forcedPs (generateGoodMovesFirst forcedPs)
 
-dfsSolve :: ([[[Int]]], (Int,Int)) -> [[[Int]]]
-dfsSolve ps = puzzleStatePuzzle (dfsSolveHelper ps (generateGoodMovesFirst ps))
+-- Solves the given puzzle state
+dfsSolver :: ([[[Int]]], (Int,Int)) -> [[[Int]]]
+dfsSolver ps = puzzleStatePuzzle (dfsSolverHelper forcedPs (generateGoodMovesFirst forcedPs))
+    where regionDims = (puzzleStateRegionDims ps)
+          p = (puzzleStatePuzzle ps)
+          forcedPs = buildPuzzleState (solveForced p regionDims) regionDims
 
-main = print (solveForced puzzle (3,3))
+-- Solve the puzzle
+main = print (dfsSolver puzzle (3,3))
