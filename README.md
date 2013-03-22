@@ -11,7 +11,7 @@ A simple Sudoku solver created to become more familiar with Haskell.
 
 ## Puzzle State Representation
 I haven't played around with any Haskell data types other than List and Int.
-For that reason, puzzles are represented as [[[Int]]]. For example:
+For that reason, puzzles are represented as `[[[Int]]]`. For example:
 
 		puzzle = [[[ ],[ ],[ ],[4],[ ],[5],[ ],[ ],[ ]],
 		          [[ ],[9],[ ],[8],[ ],[1],[ ],[7],[ ]],
