@@ -1,22 +1,24 @@
 import Data.List (intersect)
 import Data.List (sortBy)
 import Debug.Trace (trace)
+import System.Random (randomRIO)
+import Control.Monad.Random (fromList)
 
 puzzle :: [[[Int]]]
 
 -- Simple enough to solve without assumptions
 -- http://www.sudokukingdom.com/very-easy-sudoku.php
-{-
-puzzle = [[[ ],[ ],[7],[ ],[6],[9],[5],[ ],[1]],
-            [[8],[ ],[5],[ ],[7],[ ],[9],[ ],[6]],
-            [[6],[9],[ ],[5],[ ],[8],[2],[ ],[ ]],
-            [[ ],[6],[1],[ ],[4],[3],[ ],[2],[ ]],
-            [[5],[ ],[ ],[1],[9],[ ],[ ],[7],[3]],
-            [[ ],[7],[4],[ ],[ ],[5],[1],[6],[ ]],
-            [[ ],[8],[ ],[9],[ ],[ ],[ ],[5],[2]],
-            [[4],[ ],[9],[2],[5],[ ],[ ],[1],[8]],
-            [[7],[5],[ ],[6],[ ],[1],[3],[ ],[ ]]]
--}
+
+--puzzle = [[[ ],[ ],[7],[ ],[6],[9],[5],[ ],[1]],
+--            [[8],[ ],[5],[ ],[7],[ ],[9],[ ],[6]],
+--            [[6],[9],[ ],[5],[ ],[8],[2],[ ],[ ]],
+--            [[ ],[6],[1],[ ],[4],[3],[ ],[2],[ ]],
+--            [[5],[ ],[ ],[1],[9],[ ],[ ],[7],[3]],
+--            [[ ],[7],[4],[ ],[ ],[5],[1],[6],[ ]],
+--            [[ ],[8],[ ],[9],[ ],[ ],[ ],[5],[2]],
+--            [[4],[ ],[9],[2],[5],[ ],[ ],[1],[8]],
+--            [[7],[5],[ ],[6],[ ],[1],[3],[ ],[ ]]]
+
 
 -- *Main> puzzleDisplay (dfsSolve (buildPuzzleState puzzle (3,3)))
 -- [[2],[4],[7],[3],[6],[9],[5],[8],[1]]
@@ -32,17 +34,17 @@ puzzle = [[[ ],[ ],[7],[ ],[6],[9],[5],[ ],[1]],
 
 -- Easy puzzle
 -- http://puzzles.about.com/library/sudoku/blprsudokue27.htm
-{-
-puzzle = [[[ ],[ ],[ ],[4],[ ],[5],[ ],[ ],[ ]],
-          [[ ],[9],[ ],[8],[ ],[1],[ ],[7],[ ]],
-          [[2],[ ],[ ],[9],[6],[3],[ ],[ ],[8]],
-          [[ ],[ ],[7],[ ],[ ],[ ],[3],[ ],[ ]],
-          [[5],[ ],[8],[ ],[ ],[ ],[4],[ ],[1]],
-          [[ ],[ ],[6],[ ],[ ],[ ],[8],[ ],[ ]],
-          [[7],[ ],[ ],[5],[1],[6],[ ],[ ],[3]],
-          [[ ],[4],[ ],[7],[ ],[2],[ ],[5],[ ]],
-          [[ ],[ ],[ ],[3],[ ],[9],[ ],[ ],[ ]]]
--}
+
+--puzzle = [[[ ],[ ],[ ],[4],[ ],[5],[ ],[ ],[ ]],
+--          [[ ],[9],[ ],[8],[ ],[1],[ ],[7],[ ]],
+--          [[2],[ ],[ ],[9],[6],[3],[ ],[ ],[8]],
+--          [[ ],[ ],[7],[ ],[ ],[ ],[3],[ ],[ ]],
+--          [[5],[ ],[8],[ ],[ ],[ ],[4],[ ],[1]],
+--          [[ ],[ ],[6],[ ],[ ],[ ],[8],[ ],[ ]],
+--          [[7],[ ],[ ],[5],[1],[6],[ ],[ ],[3]],
+--          [[ ],[4],[ ],[7],[ ],[2],[ ],[5],[ ]],
+--          [[ ],[ ],[ ],[3],[ ],[9],[ ],[ ],[ ]]]
+
 
 -- *Main> puzzleDisplay (dfsSolve (buildPuzzleState puzzle (3,3)))
 -- [[8],[6],[1],[4],[7],[5],[9],[3],[2]]
@@ -57,6 +59,7 @@ puzzle = [[[ ],[ ],[ ],[4],[ ],[5],[ ],[ ],[ ]],
 
 -- Medium Puzzle
 -- http://puzzles.about.com/library/sudoku/blprsudokum07.htm
+
 puzzle = [[[5],[4],[ ],[2],[ ],[9],[ ],[ ],[1]],
           [[ ],[ ],[ ],[5],[ ],[ ],[ ],[ ],[4]],
           [[ ],[ ],[7],[ ],[ ],[ ],[9],[ ],[ ]],
@@ -66,6 +69,7 @@ puzzle = [[[5],[4],[ ],[2],[ ],[9],[ ],[ ],[1]],
           [[ ],[ ],[1],[ ],[ ],[ ],[6],[ ],[ ]],
           [[2],[ ],[ ],[ ],[ ],[6],[ ],[ ],[ ]],
           [[3],[ ],[ ],[1],[ ],[7],[ ],[4],[9]]]
+          
 
 ------------------------------------
 -- GENERAL HELPER FUNCTIONS --
@@ -134,6 +138,17 @@ getRegions p dims = [getRegion p dims x | x <- generateLocList dims]
 isValidList :: [[Int]] -> Bool
 isValidList [] = True
 isValidList (x:xs) = ((x == []) || (x `notElem` xs)) && (isValidList xs)
+
+
+countListOverlapsHelper :: [[Int]] -> Int -> Int
+countListOverlapsHelper [] overlaps = overlaps
+countListOverlapsHelper (x:xs) overlaps
+    | (x == []) = countListOverlapsHelper xs overlaps
+    | (x `elem` xs) = countListOverlapsHelper xs (overlaps + 1)
+    | otherwise = countListOverlapsHelper xs overlaps
+
+countListOverlaps :: [[Int]] -> Int
+countListOverlaps lst = countListOverlapsHelper lst 0
 
 -- Checks if the puzzle has no blank places
 isComplete :: [[[Int]]] -> Bool
@@ -308,17 +323,13 @@ ps `makeMove` m
 dfsSolverHelper :: ([[[Int]]], (Int,Int)) -> [((Int,Int),[Int])] -> ([[[Int]]], (Int,Int))
 dfsSolverHelper ps [] = ps
 dfsSolverHelper ps (m:moves)
-    | not (isValidState (puzzleStatePuzzle ps) (puzzleStateRegionDims ps)) = ps
-    | (isComplete forcedP) = forcedPs
-    | not (isValidState (puzzleStatePuzzle ultimateState) (puzzleStateRegionDims ps)) = (dfsSolverHelper ps moves)
+    | (isComplete newP) = newPS
     | isComplete (puzzleStatePuzzle ultimateState) = ultimateState
     | otherwise = (dfsSolverHelper ps moves)
     where newPS = (ps `makeMove` m)
           newP = (puzzleStatePuzzle newPS)
           regionDims = (puzzleStateRegionDims newPS)
-          forcedPs = buildPuzzleState (solveForced newP regionDims) regionDims
-          forcedP = (puzzleStatePuzzle forcedPs)
-          ultimateState = dfsSolverHelper forcedPs (generateGoodMovesFirst forcedPs)
+          ultimateState = dfsSolverHelper newPS (generateGoodMovesFirst newPS)
 
 -- Solves the given puzzle state
 dfsSolver :: ([[[Int]]], (Int,Int)) -> [[[Int]]]
@@ -327,5 +338,72 @@ dfsSolver ps = puzzleStatePuzzle (dfsSolverHelper forcedPs (generateGoodMovesFir
           p = (puzzleStatePuzzle ps)
           forcedPs = buildPuzzleState (solveForced p regionDims) regionDims
 
+------------------------------------
+-- SIMULATED ANNEALING SOLVER --
+------------------------------------
+
+-- The algorithm works by first guessing a solution at random -- 
+-- filling in the empty cells above with random digits between 1 and 9. 
+-- Then it "scores" this solution by counting the number of digits duplicated
+-- in all the rows, columns and blocks. Next it evaluates a number of candidate 
+-- new solutions by tweaking one of the free digits, and scores those. The 
+-- algorithm then selects one of the candidate solutions at random for the
+-- next step, weighted by the change in the score.
+
+---- http://speely.wordpress.com/2010/08/16/selecting-a-random-element-in-haskell/
+pick :: [a] -> IO a
+pick xs = randomRIO (0, (length xs - 1)) >>= return . (xs !!)
+
+scorePuzzleState :: ([[[Int]]], (Int,Int)) -> Int
+scorePuzzleState ps = (sum (map countListOverlaps (getRows p))) + (sum (map countListOverlaps (getColumns p))) + (sum (map countListOverlaps (getRegions p regionDims)))
+    where p = (puzzleStatePuzzle ps)
+          regionDims = (puzzleStateRegionDims ps)
+
+
+puzzleAndScoreFromState :: ([[[Int]]], (Int,Int)) -> ([[[Int]]], (Int))
+puzzleAndScoreFromState ps = (p,scorePuzzleState ps)
+    where p = (puzzleStatePuzzle ps)
+
+-- 
+emptySpots :: ([[[Int]]], (Int,Int)) -> [(Int,Int)]
+emptySpots ps = [snd x | x <- (filter (\x -> (fst x)==[]) [((getSymbolAt p loc), loc) | loc <- (generateAllLocs p)])]
+    where p = (puzzleStatePuzzle ps)
+
+--fillHolesAtRandom :: ([[[Int]]], (Int,Int)) -> ([[[Int]]], (Int,Int))
+fillHolesAtRandom initialPs
+    | (isComplete puzzle) = initialPs
+    | otherwise = do
+                    symb <- pick (allPossibleOptions ((puzzleStatePuzzle initialPs) !! 0))
+                    let pureRes = fillHolesAtRandom (buildPuzzleState (placeSymbolAt puzzle symb spot) regionDims)
+                    pureRes
+    where puzzle = (puzzleStatePuzzle initialPs)
+          regionDims = (puzzleStatePuzzle initialPs)
+          spot:_ = emptySpots initialPs
+          -- test = do
+          --        symb <- pick (allPossibleOptions ((puzzleStatePuzzle initialPs) !! 0))
+          --        return fillHolesAtRandom (buildPuzzleState (placeSymbolAt puzzle symb spot) regionDims)
+                  -- return thing
+          -- symb = do {x <- pick (allPossibleOptions ((puzzleStatePuzzle initialPs) !! 0)); return [x]}
+
+--fillOneUnlocked :: ([[[Int]]], (Int,Int)) -> ([[[Int]]], (Int,Int)) -> ([[[Int]]], (Int,Int))
+--fillOneUnlocked initialPs finalPs = fillHolesAtRandom (buildPuzzleState (placeSymbolAt finalPs [symb] spot) regionDims)
+--    where puzzle = (puzzleStatePuzzle initialPs)
+--          regionDims = (puzzleStatePuzzle initialPs)
+--          spot = do {x <- pick (emptySpots initialPs); return x}
+--          symb = do {x <- pick (allPossibleOptions ((puzzleStatePuzzle initialPs) !! 0)); return x}
+
+--simulatedAnnealingHelper :: ([[[Int]]], (Int,Int)) -> Int -> [([[[Int]]],Int)] -> [[[Int]]]
+--simulatedAnnealingHelper initialPs optionCount options
+--    | not (null currSolutions) = currSolutions !! 0
+--    | otherwise = simulatedAnnealingHelper initialPs optionCount [(puzzleAndScoreFromState (fillOneUnlocked initialPs randomPs)) | x <- [1..optionCount]]
+--    where currSolutions = (filter isSolved (map fst options))
+--          randomPs = (buildPuzzleState (fromList options) (puzzleStateRegionDims initialPs))
+
+
+--simulatedAnnealing :: ([[[Int]]], (Int,Int)) -> [[[Int]]]
+--simulatedAnnealing ps = simulatedAnnealingHelper ps optionCount [(puzzleAndScoreFromState (fillOneUnlocked ps filled)) | x <- [1..optionCount]]
+--    where filled = fillHolesAtRandom ps
+--          optionCount = 10
+
 -- Solve the puzzle
-main = print (dfsSolver puzzle (3,3))
+main = print (dfsSolver (buildPuzzleState puzzle (3,3)))
