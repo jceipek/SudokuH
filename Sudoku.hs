@@ -342,6 +342,11 @@ dfsSolver ps = puzzleStatePuzzle (dfsSolverHelper forcedPs (generateGoodMovesFir
 -- SIMULATED ANNEALING SOLVER --
 ------------------------------------
 
+---- http://speely.wordpress.com/2010/08/16/selecting-a-random-element-in-haskell/
+pick :: [a] -> IO a
+pick xs = randomRIO (0, (length xs - 1)) >>= return . (xs !!)
+
+-- http://blog.revolutionanalytics.com/2010/02/solving-sudoku-with-simulated-annealing.html
 -- The algorithm works by first guessing a solution at random -- 
 -- filling in the empty cells above with random digits between 1 and 9. 
 -- Then it "scores" this solution by counting the number of digits duplicated
@@ -350,60 +355,80 @@ dfsSolver ps = puzzleStatePuzzle (dfsSolverHelper forcedPs (generateGoodMovesFir
 -- algorithm then selects one of the candidate solutions at random for the
 -- next step, weighted by the change in the score.
 
----- http://speely.wordpress.com/2010/08/16/selecting-a-random-element-in-haskell/
-pick :: [a] -> IO a
-pick xs = randomRIO (0, (length xs - 1)) >>= return . (xs !!)
-
-scorePuzzleState :: ([[[Int]]], (Int,Int)) -> Int
-scorePuzzleState ps = (sum (map countListOverlaps (getRows p))) + (sum (map countListOverlaps (getColumns p))) + (sum (map countListOverlaps (getRegions p regionDims)))
+scorePuzzleState :: ([[[Int]]], (Int,Int)) -> Rational
+scorePuzzleState ps
+  | s == 0 = toRational 0
+  | otherwise = 1/s
     where p = (puzzleStatePuzzle ps)
           regionDims = (puzzleStateRegionDims ps)
+          s = toRational ((sum (map countListOverlaps (getRows p))) + 
+              (sum (map countListOverlaps (getColumns p))) + 
+              (sum (map countListOverlaps (getRegions p regionDims))))
 
 
-puzzleAndScoreFromState :: ([[[Int]]], (Int,Int)) -> ([[[Int]]], (Int))
-puzzleAndScoreFromState ps = (p,scorePuzzleState ps)
-    where p = (puzzleStatePuzzle ps)
+puzzleAndScoreFromState :: IO ([[[Int]]], (Int,Int)) -> IO ([[[Int]]], Rational)
+puzzleAndScoreFromState iops = do ps <- iops
+                                  let p = (puzzleStatePuzzle ps)
+                                  return (p,scorePuzzleState ps)
 
 -- 
 emptySpots :: ([[[Int]]], (Int,Int)) -> [(Int,Int)]
 emptySpots ps = [snd x | x <- (filter (\x -> (fst x)==[]) [((getSymbolAt p loc), loc) | loc <- (generateAllLocs p)])]
     where p = (puzzleStatePuzzle ps)
 
---fillHolesAtRandom :: ([[[Int]]], (Int,Int)) -> ([[[Int]]], (Int,Int))
+fillHolesAtRandom :: ([[[Int]]], (Int, Int)) -> IO ([[[Int]]], (Int, Int))
 fillHolesAtRandom initialPs
-    | (isComplete puzzle) = initialPs
+    | (isComplete p) = return initialPs
     | otherwise = do
-                    symb <- pick (allPossibleOptions ((puzzleStatePuzzle initialPs) !! 0))
-                    let pureRes = fillHolesAtRandom (buildPuzzleState (placeSymbolAt puzzle symb spot) regionDims)
-                    pureRes
-    where puzzle = (puzzleStatePuzzle initialPs)
-          regionDims = (puzzleStatePuzzle initialPs)
+                    symb <- pick [[x] | x <- (allPossibleOptions ((puzzleStatePuzzle initialPs) !! 0))]
+                    partiallyFilled <- fillHolesAtRandom (buildPuzzleState (placeSymbolAt p symb spot) regionDims)
+                    return partiallyFilled
+    where p = (puzzleStatePuzzle initialPs)
+          regionDims = (puzzleStateRegionDims initialPs)
           spot:_ = emptySpots initialPs
-          -- test = do
-          --        symb <- pick (allPossibleOptions ((puzzleStatePuzzle initialPs) !! 0))
-          --        return fillHolesAtRandom (buildPuzzleState (placeSymbolAt puzzle symb spot) regionDims)
-                  -- return thing
-          -- symb = do {x <- pick (allPossibleOptions ((puzzleStatePuzzle initialPs) !! 0)); return [x]}
 
---fillOneUnlocked :: ([[[Int]]], (Int,Int)) -> ([[[Int]]], (Int,Int)) -> ([[[Int]]], (Int,Int))
---fillOneUnlocked initialPs finalPs = fillHolesAtRandom (buildPuzzleState (placeSymbolAt finalPs [symb] spot) regionDims)
---    where puzzle = (puzzleStatePuzzle initialPs)
---          regionDims = (puzzleStatePuzzle initialPs)
---          spot = do {x <- pick (emptySpots initialPs); return x}
---          symb = do {x <- pick (allPossibleOptions ((puzzleStatePuzzle initialPs) !! 0)); return x}
+fillOneUnlocked :: ([[[Int]]], (Int,Int)) -> ([[[Int]]], (Int,Int)) -> IO ([[[Int]]], (Int,Int))
+fillOneUnlocked lockedPs ps = do spot <- pick (emptySpots lockedPs)
+                                 symb <- pick (allPossibleOptions ((puzzleStatePuzzle lockedPs) !! 0))
+                                 return (buildPuzzleState (placeSymbolAt p [symb] spot) regionDims)
+    where regionDims = (puzzleStateRegionDims lockedPs)
+          p = (puzzleStatePuzzle ps)
 
---simulatedAnnealingHelper :: ([[[Int]]], (Int,Int)) -> Int -> [([[[Int]]],Int)] -> [[[Int]]]
---simulatedAnnealingHelper initialPs optionCount options
---    | not (null currSolutions) = currSolutions !! 0
---    | otherwise = simulatedAnnealingHelper initialPs optionCount [(puzzleAndScoreFromState (fillOneUnlocked initialPs randomPs)) | x <- [1..optionCount]]
---    where currSolutions = (filter isSolved (map fst options))
---          randomPs = (buildPuzzleState (fromList options) (puzzleStateRegionDims initialPs))
+fillNUnlocked :: ([[[Int]]], (Int,Int)) -> ([[[Int]]], (Int,Int)) -> Int -> IO ([[[Int]]], (Int,Int)) 
+fillNUnlocked lockedPs ps 0 = return ps
+fillNUnlocked lockedPs ps n = do filled <- fillOneUnlocked lockedPs ps
+                                 res <- fillNUnlocked lockedPs filled (n-1)                                       
+                                 return res
+
+produceNewOptions :: ([[[Int]]], (Int,Int)) -> ([[[Int]]], (Int,Int)) -> Int -> IO [([[[Int]]], Rational)]
+produceNewOptions lockedPs ps 0 = return []
+produceNewOptions lockedPs ps optionCount = do option <- (puzzleAndScoreFromState (fillNUnlocked lockedPs ps 2))
+                                               rest <- produceNewOptions lockedPs ps (optionCount - 1)
+                                               return (option:rest)
+
+simulatedAnnealingHelper :: ([[[Int]]], (Int,Int)) -> Int -> [([[[Int]]],Rational)] -> IO [[[Int]]]
+simulatedAnnealingHelper initialPs optionCount options = do   let rats = (map snd options)
+                                                              let minmaxEl = (minimum rats, maximum rats)
+                                                              print minmaxEl
+                                                              let currSolutions = (filter (\x -> isSolved x regionDims) (map fst options))
+                                                              if not (null currSolutions)
+                                                                then return (currSolutions !! 0)
+                                                              else do
+                                                                randomP <- (fromList options)
+                                                                let randomPs = (buildPuzzleState randomP (puzzleStateRegionDims initialPs))
+                                                                newOpts <- produceNewOptions initialPs randomPs optionCount
+                                                                res <- simulatedAnnealingHelper initialPs optionCount newOpts
+                                                                return res
+    where regionDims = (puzzleStateRegionDims initialPs)
 
 
---simulatedAnnealing :: ([[[Int]]], (Int,Int)) -> [[[Int]]]
---simulatedAnnealing ps = simulatedAnnealingHelper ps optionCount [(puzzleAndScoreFromState (fillOneUnlocked ps filled)) | x <- [1..optionCount]]
---    where filled = fillHolesAtRandom ps
---          optionCount = 10
+simulatedAnnealing :: ([[[Int]]], (Int,Int)) -> IO [[[Int]]]
+simulatedAnnealing ps = do filled <- fillHolesAtRandom ps
+                           options <- produceNewOptions ps filled optionCount
+                           res <- simulatedAnnealingHelper ps optionCount options
+                           return res
+    where 
+          optionCount = 10
 
 -- Solve the puzzle
 main = print (dfsSolver (buildPuzzleState puzzle (3,3)))
